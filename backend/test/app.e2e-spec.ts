@@ -20,7 +20,13 @@ describe('AppController (e2e)', () => {
     return request(app.getHttpServer())
       .get('/')
       .expect(200)
-      .expect('Hello World!');
+      .expect('Content-Type', /json/)
+      .expect((res) => {
+        expect(res.body.status).toBe('healthy');
+        expect(typeof res.body.service).toBe('string');
+        expect(typeof res.body.version).toBe('string');
+        expect(res.body.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      });
   });
 
   afterEach(async () => {
