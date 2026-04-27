@@ -1,0 +1,305 @@
+---
+const apiBase = import.meta.env.PUBLIC_API_BASE_URL ?? '/api';
+---
+
+<section class="chat" aria-label="Chat de soporte">
+	<header class="chat__header">
+		<h1 class="chat__title">Soporte con IA</h1>
+		<p class="chat__subtitle">
+			Escribe tu consulta. Las respuestas las genera el modelo configurado en el servidor.
+		</p>
+	</header>
+
+	<div class="chat__panel">
+		<div id="chat-messages" class="chat__messages" role="log" aria-live="polite"></div>
+		<p id="chat-error" class="chat__error" hidden></p>
+		<form id="chat-form" class="chat__form">
+			<label class="visually-hidden" for="chat-input">Mensaje</label>
+			<textarea
+				id="chat-input"
+				class="chat__input"
+				rows="3"
+				placeholder="Ej.: ¿Cómo reinicio el servicio de red en Ubuntu?"
+				autocomplete="off"
+			></textarea>
+			<div class="chat__actions">
+				<span class="chat__hint">Enter envía · Shift+Enter nueva línea</span>
+				<button type="submit" id="chat-send" class="chat__send">Enviar</button>
+			</div>
+		</form>
+	</div>
+</section>
+
+<script define:vars={{ apiBase }}>
+	const messagesEl = document.getElementById('chat-messages');
+	const formEl = document.getElementById('chat-form');
+	const inputEl = document.getElementById('chat-input');
+	const sendBtn = document.getElementById('chat-send');
+	const errorEl = document.getElementById('chat-error');
+
+	/** @type {{ role: 'user' | 'assistant', content: string }[]} */
+	const history = [];
+
+	const base = String(apiBase).replace(/\/$/, '');
+
+	function appendBubble(role, text) {
+		const wrap = document.createElement('div');
+		wrap.className = `chat__bubble chat__bubble--${role}`;
+		const label = document.createElement('span');
+		label.className = 'chat__bubble-label';
+		label.textContent = role === 'user' ? 'Tú' : 'Asistente';
+		const body = document.createElement('div');
+		body.className = 'chat__bubble-body';
+		body.textContent = text;
+		wrap.appendChild(label);
+		wrap.appendChild(body);
+		messagesEl?.appendChild(wrap);
+		messagesEl?.scrollTo({ top: messagesEl.scrollHeight, behavior: 'smooth' });
+	}
+
+	function setError(msg) {
+		if (!errorEl) return;
+		if (msg) {
+			errorEl.textContent = msg;
+			errorEl.hidden = false;
+		} else {
+			errorEl.textContent = '';
+			errorEl.hidden = true;
+		}
+	}
+
+	function setLoading(loading) {
+		if (sendBtn) sendBtn.disabled = loading;
+		if (inputEl) inputEl.disabled = loading;
+	}
+
+	formEl?.addEventListener('submit', async (e) => {
+		e.preventDefault();
+		const text = inputEl?.value?.trim() ?? '';
+		if (!text) return;
+
+		setError('');
+		appendBubble('user', text);
+		if (inputEl) inputEl.value = '';
+
+		const historyForApi = history.map((m) => ({ ...m }));
+
+		setLoading(true);
+		try {
+			const res = await fetch(`${base}/ollama/chat`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					message: text,
+					history: historyForApi,
+				}),
+			});
+
+			const data = await res.json().catch(() => ({}));
+
+			if (!res.ok) {
+				const raw =
+					typeof data.message === 'string'
+						? data.message
+						: JSON.stringify(data.message ?? data);
+				throw new Error(raw || `Error ${res.status}`);
+			}
+
+			const reply =
+				typeof data.reply === 'string' && data.reply.length > 0
+					? data.reply
+					: '(Sin respuesta del modelo)';
+
+			appendBubble('assistant', reply);
+			history.push({ role: 'user', content: text });
+			history.push({ role: 'assistant', content: reply });
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : 'Error de red';
+			setError(msg);
+			const last = messagesEl?.lastElementChild;
+			if (last?.classList.contains('chat__bubble--user')) last.remove();
+		} finally {
+			setLoading(false);
+			inputEl?.focus();
+		}
+	});
+
+	inputEl?.addEventListener('keydown', (e) => {
+		if (e.key !== 'Enter' || e.shiftKey) return;
+		e.preventDefault();
+		formEl?.requestSubmit();
+	});
+</script>
+
+<style>
+	.chat {
+		max-width: 42rem;
+		margin: 0 auto;
+		padding: 1.5rem 1rem 2rem;
+		min-height: 100vh;
+		box-sizing: border-box;
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
+	}
+
+	.chat__header {
+		text-align: center;
+	}
+
+	.chat__title {
+		margin: 0 0 0.35rem;
+		font-size: 1.5rem;
+		font-weight: 700;
+		letter-spacing: -0.02em;
+	}
+
+	.chat__subtitle {
+		margin: 0;
+		font-size: 0.9rem;
+		color: var(--muted);
+		line-height: 1.45;
+	}
+
+	.chat__panel {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		background: var(--surface);
+		border: 1px solid var(--border);
+		border-radius: 12px;
+		overflow: hidden;
+		min-height: 22rem;
+	}
+
+	.chat__messages {
+		flex: 1;
+		padding: 1rem;
+		overflow-y: auto;
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
+	}
+
+	.chat__bubble {
+		max-width: 90%;
+		padding: 0.65rem 0.85rem;
+		border-radius: 10px;
+		border: 1px solid var(--border);
+	}
+
+	.chat__bubble--user {
+		align-self: flex-end;
+		background: var(--user-bg);
+	}
+
+	.chat__bubble--assistant {
+		align-self: flex-start;
+		background: var(--assistant-bg);
+	}
+
+	.chat__bubble-label {
+		display: block;
+		font-size: 0.7rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		color: var(--muted);
+		margin-bottom: 0.25rem;
+	}
+
+	.chat__bubble-body {
+		font-size: 0.95rem;
+		line-height: 1.5;
+		white-space: pre-wrap;
+		word-break: break-word;
+	}
+
+	.chat__error {
+		margin: 0 1rem;
+		padding: 0.5rem 0.65rem;
+		font-size: 0.85rem;
+		color: var(--danger);
+		background: rgba(248, 113, 113, 0.08);
+		border-radius: 8px;
+		border: 1px solid rgba(248, 113, 113, 0.25);
+	}
+
+	.chat__form {
+		border-top: 1px solid var(--border);
+		padding: 0.75rem 1rem 1rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+
+	.chat__input {
+		width: 100%;
+		box-sizing: border-box;
+		resize: vertical;
+		min-height: 4.5rem;
+		padding: 0.65rem 0.75rem;
+		font: inherit;
+		font-size: 0.95rem;
+		color: var(--text);
+		background: var(--bg);
+		border: 1px solid var(--border);
+		border-radius: 8px;
+	}
+
+	.chat__input:focus {
+		outline: 2px solid var(--accent);
+		outline-offset: 1px;
+		border-color: var(--accent-dim);
+	}
+
+	.chat__input:disabled {
+		opacity: 0.65;
+	}
+
+	.chat__actions {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.75rem;
+		flex-wrap: wrap;
+	}
+
+	.chat__hint {
+		font-size: 0.75rem;
+		color: var(--muted);
+	}
+
+	.chat__send {
+		font: inherit;
+		font-weight: 600;
+		font-size: 0.9rem;
+		padding: 0.5rem 1.15rem;
+		color: #fff;
+		background: var(--accent);
+		border: none;
+		border-radius: 8px;
+		cursor: pointer;
+	}
+
+	.chat__send:hover:not(:disabled) {
+		background: var(--accent-dim);
+	}
+
+	.chat__send:disabled {
+		opacity: 0.55;
+		cursor: not-allowed;
+	}
+
+	.visually-hidden {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
+	}
+</style>
